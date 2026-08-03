@@ -1,0 +1,34 @@
+{
+  "name": "roopstudio",
+  "version": "0.1.0",
+  "description": "MCP server + Studio UI สำหรับสั่ง Photopea ด้วย AI — เห็นทุกขั้นที่ AI ทำ และกดทำเองได้ด้วย",
+  "type": "module",
+  "bin": {
+    "roopstudio": "./src/index.js"
+  },
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "mock": "node src/index.js --mock",
+    "ui": "node src/index.js --mock --ui-only"
+  },
+  "keywords": [
+    "mcp",
+    "modelcontextprotocol",
+    "photopea",
+    "image-editing",
+    "ai",
+    "thai"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "packageManager": "pnpm@11.9.0",
+  "dependencies": {
+    "@imgly/background-removal-node": "^1.4.5",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "ws": "^8.18.0",
+    "zod": "^3.23.8"
+  }
+}

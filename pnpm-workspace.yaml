@@ -1,0 +1,10 @@
+# pnpm 11: อนุมัติ postinstall ล่วงหน้า — ไม่เจอ approve-builds prompt
+allowBuilds: { onnxruntime-node: true, sharp: true }
+# รูปแบบเก่า (pnpm 10) เผื่อไว้
+onlyBuiltDependencies: []
+# รับเฉพาะแพ็กเกจอายุ >= 3 วัน (กัน supply-chain attack)
+minimumReleaseAge: 4320
+# sharp 0.32.x (ที่ @imgly/background-removal-node ล็อกไว้) ไม่มี prebuild
+# สำหรับ Node napi 7 บน arm64 mac — บังคับใช้ 0.33+ ที่คอมไพล์/ดาวน์โหลดได้จริง
+overrides:
+  sharp: ^0.33.5

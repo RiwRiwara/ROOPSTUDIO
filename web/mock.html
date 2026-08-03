@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<title>Mock Photopea — RoopStudio</title>
+<style>
+  body{margin:0;background:#1e1e1e;color:#ddd;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;height:100vh;display:flex;flex-direction:column}
+  h1{font-size:12px;padding:8px 12px;background:#111;color:#8a8a8a;font-weight:400;letter-spacing:.08em;border-bottom:1px solid #333}
+  #wrap{flex:1;display:flex;min-height:0}
+  #canvas-host{flex:1;display:flex;align-items:center;justify-content:center;background:#2a2a2a;padding:16px;min-width:0}
+  #canvas-host canvas{max-width:100%;max-height:100%;box-shadow:0 0 0 1px #444;background:#fff}
+  #log{width:300px;flex:none;border-left:1px solid #333;overflow:auto;padding:8px;white-space:pre-wrap;word-break:break-all;line-height:1.5}
+  .l-err{color:#ff8a8a}
+  .l-ok{color:#8ac0ff}
+  .l-file{color:#9ae6a0}
+</style>
+</head>
+<body>
+<h1>MOCK PHOTOPEA — ล้อ API จริงไว้ทดสอบ/เดโมแบบไม่ต้องต่อเน็ต</h1>
+<div id="wrap">
+  <div id="canvas-host"><canvas id="cv" width="600" height="400"></canvas></div>
+  <div id="log"></div>
+</div>
+<script>
+'use strict';
+/*
+  Mock Photopea: จำลอง object model แบบเดียวกับ Photopea/Photoshop scripting
+  เพียงพอสำหรับรันสคริปต์ที่ RoopStudio สร้างจริง ๆ — ถ้าสคริปต์เขียนผิด syntax
+  หรือเรียก API ที่ไม่มีอยู่ จะพังตรงนี้ก่อนไปเจอของจริง
+*/
+var logEl = document.getElementById('log');
+function log(s, cls) {
+  var d = document.createElement('div');
+  if (cls) d.className = cls;
+  d.textContent = s;
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function reply(x) { parent.postMessage(x, '*'); }
+
+// --- enums ---
+var LayerKind = { TEXT: 'text', NORMAL: 'normal' };
+var TextType = { POINTTEXT: 'point', PARAGRAPHTEXT: 'para' };
+var Justification = { LEFT: 'left', CENTER: 'center', RIGHT: 'right' };
+var NewDocumentMode = { RGB: 'rgb' };
+var AnchorPosition = { MIDDLECENTER: 'mc', TOPLEFT: 'tl' };
+var ResampleMethod = { BICUBIC: 'bicubic' };
+var SaveOptions = { DONOTSAVECHANGES: 'no' };
+function SolidColor() { this.rgb = { red: 0, green: 0, blue: 0, hexValue: '000000' }; }
+function hexOf(c) {
+  function h(n) { return ('0' + Math.round(n).toString(16)).slice(-2); }
+  return '#' + h(c.rgb.red) + h(c.rgb.green) + h(c.rgb.blue);
+}
+
+// --- model ---
+function TextItem() {
+  this.kind = TextType.POINTTEXT; this.contents = ''; this.position = [0, 0];
+  this.size = 24; this.font = 'ArialMT'; this.color = new SolidColor();
+  this.justification = Justification.LEFT; this.leading = 0; this.tracking = 0;
+  this.width = 0; this.height = 0;
+}
+function ArtLayer(doc) {
+  this.doc = doc; this.kind = LayerKind.NORMAL; this.name = 'Layer';
+  this.opacity = 100; this.textItem = new TextItem(); this.ops = [];
+  this.bounds = [0, 0, doc.width, doc.height];
+}
+ArtLayer.prototype.resize = function (w, h) { this.ops.push('resize ' + w + '%'); };
+ArtLayer.prototype.translate = function (x, y) { this.ops.push('translate ' + x + ',' + y); };
+ArtLayer.prototype.adjustBrightnessContrast = function (b, c) { this.ops.push('bc ' + b + '/' + c); };
+ArtLayer.prototype.desaturate = function () { this.ops.push('desaturate'); };
+ArtLayer.prototype.invert = function () { this.ops.push('invert'); };
+
+function Selection(doc) { this.doc = doc; this.shape = null; }
+Selection.prototype.selectAll = function () { this.shape = [[0, 0], [this.doc.width, 0], [this.doc.width, this.doc.height], [0, this.doc.height]]; };
+Selection.prototype.select = function (pts) { this.shape = pts; };
+Selection.prototype.selectEllipse = function () { this.shape = null; };
+Selection.prototype.deselect = function () { this.shape = null; };
+Selection.prototype.copy = function () { CLIP = { w: this.doc.width, h: this.doc.height, doc: this.doc }; };
+Selection.prototype.fill = function (color) {
+  var l = this.doc.layers[this.doc.layers.length - 1];
+  if (l) { l.fillShape = this.shape; l.fillColor = hexOf(color); }
+  else { this.doc.bg = hexOf(color); }
+  if (this.shape && this.shape.length === 4 &&
+      this.shape[0][0] === 0 && this.shape[0][1] === 0 &&
+      this.shape[2][0] === this.doc.width && this.shape[2][1] === this.doc.height && !l) {
+    this.doc.bg = hexOf(color);
+  }
+};
+
+var CLIP = null;
+var DOC_SEQ = 0;
+
+function Document(w, h, name) {
+  this.width = w; this.height = h; this.name = name || ('Untitled-' + (++DOC_SEQ));
+  this.layers = []; this.artLayers = { add: (function (self) {
+    return function () { var l = new ArtLayer(self); self.layers.push(l); self.activeLayer = l; return l; };
+  })(this) };
+  this.selection = new Selection(this);
+  this.bg = '#ffffff';
+  this.activeLayer = null;
+  this.historyStates = [{ n: 0 }, { n: 1 }, { n: 2 }];
+  this.activeHistoryState = this.historyStates[2];
+}
+Document.prototype.resizeImage = function (w, h) { this.width = Math.round(w); this.height = Math.round(h); };
+Document.prototype.resizeCanvas = function (w, h) { this.width = Math.round(w); this.height = Math.round(h); };
+Document.prototype.duplicate = function (name) {
+  var d = new Document(this.width, this.height, name || (this.name + ' copy'));
+  d.bg = this.bg;
+  d.layers = this.layers.slice();
+  app.documents.push(d);
+  return d;
+};
+Document.prototype.close = function () {
+  var i = app.documents.indexOf(this);
+  if (i > -1) app.documents.splice(i, 1);
+  app.activeDocument = app.documents[app.documents.length - 1] || null;
+};
+Document.prototype.paste = function () {
+  var l = new ArtLayer(this);
+  l.name = 'pasted'; l.isImage = true;
+  l.srcW = CLIP ? CLIP.w : this.width; l.srcH = CLIP ? CLIP.h : this.height;
+  this.layers.push(l); this.activeLayer = l;
+  return l;
+};
+Document.prototype.saveToOE = function (fmt) {
+  var buf = renderDoc(this, fmt);
+  log('saveToOE(' + fmt + ') → ' + this.width + '×' + this.height + ' ' + buf.byteLength + ' bytes', 'l-file');
+  reply(buf);
+};
+
+var app = {
+  documents: [],
+  activeDocument: null,
+  fonts: [{ postScriptName: 'ArialMT' }, { postScriptName: 'Helvetica' }, { postScriptName: 'MockThai-Regular' }],
+  echoToOE: function (s) { log('echo: ' + String(s).slice(0, 200), 'l-ok'); reply(String(s)); },
+  open: function (url) {
+    // ล้อพฤติกรรมจริง: เปิดไฟล์ฟอนต์/รูปจาก URL แล้วกลายเป็นเอกสารใหม่
+    var name = String(url).split('/').pop().split('?')[0] || 'opened';
+    var d = new Document(400, 300, name);
+    app.documents.push(d); app.activeDocument = d;
+    if (/\.(ttf|otf|woff2?)$/i.test(name)) {
+      app.fonts.push({ postScriptName: name.replace(/\.[^.]+$/, '') });
+    }
+    log('open(' + name + ')');
+    return d;
+  }
+};
+Object.defineProperty(app.documents, 'getByName', {
+  enumerable: false,
+  value: function (n) {
+    for (var i = 0; i < this.length; i++) if (this[i].name === n) return this[i];
+    throw new Error('ไม่พบเอกสารชื่อ ' + n);
+  }
+});
+Object.defineProperty(app.documents, 'add', {
+  enumerable: false,
+  value: function (w, h, res, name) {
+    var d = new Document(w, h, name);
+    app.documents.push(d); app.activeDocument = d;
+    log('documents.add(' + w + '×' + h + ', ' + d.name + ')');
+    return d;
+  }
+});
+
+// --- วาดภาพจำลองลง canvas แล้วส่งกลับเป็นไฟล์จริง ---
+var cv = document.getElementById('cv');
+function renderDoc(doc, fmt) {
+  cv.width = doc.width; cv.height = doc.height;
+  var g = cv.getContext('2d');
+  g.fillStyle = doc.bg || '#ffffff';
+  g.fillRect(0, 0, doc.width, doc.height);
+
+  doc.layers.forEach(function (l) {
+    if (l.isImage) {
+      // รูปที่วางเข้ามา — วาดเป็นลายตารางแทน
+      g.save();
+      g.globalAlpha = (l.opacity || 100) / 100;
+      var step = Math.max(24, Math.round(doc.width / 16));
+      for (var y = 0; y < doc.height; y += step) {
+        for (var x = 0; x < doc.width; x += step) {
+          g.fillStyle = ((x / step + y / step) % 2 === 0) ? '#8a8a8a' : '#6d6d6d';
+          g.fillRect(x, y, step, step);
+        }
+      }
+      g.restore();
+      return;
+    }
+    if (l.kind === LayerKind.TEXT) {
+      var t = l.textItem;
+      g.save();
+      g.globalAlpha = (l.opacity || 100) / 100;
+      g.fillStyle = hexOf(t.color);
+      g.font = '700 ' + t.size + 'px sans-serif';
+      g.textAlign = t.justification === Justification.CENTER ? 'center'
+        : t.justification === Justification.RIGHT ? 'right' : 'left';
+      g.textBaseline = 'top';
+      var maxW = t.width || (doc.width - t.position[0] * 2);
+      var lh = t.leading || Math.round(t.size * 1.25);
+      var out = [];
+      String(t.contents).split('\n').forEach(function (para) {
+        var words = para.split(' '), line = '';
+        words.forEach(function (w) {
+          var test = line ? line + ' ' + w : w;
+          if (g.measureText(test).width > maxW && line) { out.push(line); line = w; }
+          else line = test;
+        });
+        out.push(line);
+      });
+      out.forEach(function (ln, i) { g.fillText(ln, t.position[0], t.position[1] + i * lh); });
+      g.restore();
+      return;
+    }
+    if (l.fillShape && l.fillColor) {
+      var p = l.fillShape;
+      g.save();
+      g.globalAlpha = (l.opacity || 100) / 100;
+      g.fillStyle = l.fillColor;
+      g.beginPath();
+      g.moveTo(p[0][0], p[0][1]);
+      for (var i = 1; i < p.length; i++) g.lineTo(p[i][0], p[i][1]);
+      g.closePath(); g.fill();
+      g.restore();
+    }
+  });
+
+  var mime = fmt.indexOf('jpg') === 0 ? 'image/jpeg' : fmt.indexOf('webp') === 0 ? 'image/webp' : 'image/png';
+  var url = cv.toDataURL(mime, 0.9);
+  var b64 = url.split(',')[1];
+  var bin = atob(b64), bytes = new Uint8Array(bin.length);
+  for (var k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+  return bytes.buffer;
+}
+
+// --- รับคำสั่งจากหน้า Studio ---
+window.addEventListener('message', function (e) {
+  var data = e.data;
+
+  if (data instanceof ArrayBuffer) {
+    var d = new Document(1200, 800, 'loaded-' + (++DOC_SEQ));
+    var l = new ArtLayer(d); l.isImage = true; l.name = 'loaded';
+    d.layers.push(l); d.activeLayer = l;
+    app.documents.push(d); app.activeDocument = d;
+    log('รับไฟล์ ' + data.byteLength + ' bytes → เปิดเป็นเอกสาร ' + d.name);
+    reply('done');
+    return;
+  }
+
+  if (typeof data !== 'string') return;
+  log('▸ script (' + data.length + ' ตัวอักษร)');
+  try {
+    var fn = new Function(
+      'app', 'SolidColor', 'LayerKind', 'TextType', 'Justification',
+      'NewDocumentMode', 'AnchorPosition', 'ResampleMethod', 'SaveOptions',
+      data
+    );
+    fn(app, SolidColor, LayerKind, TextType, Justification,
+      NewDocumentMode, AnchorPosition, ResampleMethod, SaveOptions);
+  } catch (err) {
+    log('ERROR: ' + err.message, 'l-err');
+    reply('error: ' + err.message);
+  }
+  reply('done');
+});
+
+// บอกหน้าแม่ว่าโหลดเสร็จแล้ว (Photopea จริงส่ง 'done' ตอนโหลดเสร็จเหมือนกัน)
+setTimeout(function () { log('mock พร้อมใช้งาน'); reply('done'); }, 250);
+</script>
+</body>
+</html>

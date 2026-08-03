@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RoopStudio — สั่ง Photopea ด้วย AI แล้วดูมันทำงานสด ๆ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@700;900&family=IBM+Plex+Sans+Thai:wght@400;500;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<style>
+:root{--ink:#111111;--paper:#fafaf7;--graphite:#3d3d3d;--ash:#8a8a8a;--mist:#e8e8e4;--white:#fff}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--paper);color:var(--ink);font-family:'IBM Plex Sans Thai',sans-serif;line-height:1.55;-webkit-font-smoothing:antialiased;overflow:hidden}
+.mono{font-family:'JetBrains Mono',monospace}
+#app{display:flex;flex-direction:column;height:100%}
+
+header{display:flex;align-items:center;gap:14px;padding:10px 18px;border-bottom:2px solid var(--ink);background:var(--paper);flex-wrap:wrap}
+header h1{font-family:'Archivo',sans-serif;font-weight:900;font-size:19px;letter-spacing:-0.01em}
+header .tag{font-size:12.5px;color:var(--graphite)}
+.spacer{flex:1}
+.pill{font-size:11px;font-weight:700;border:1.5px solid var(--mist);color:var(--ash);border-radius:999px;padding:3px 11px;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.pill.on{border-color:var(--ink);color:var(--ink)}
+.pill .dot{width:7px;height:7px;border-radius:50%;background:var(--mist)}
+.pill.on .dot{background:var(--ink)}
+.pill.warn{border-color:var(--ink);background:var(--ink);color:var(--paper)}
+
+main{flex:1;display:flex;min-height:0}
+#stage{flex:1;min-width:0;position:relative;background:var(--mist)}
+#pea{width:100%;height:100%;border:0;display:block}
+#veil{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(250,250,247,.93);z-index:5;text-align:center;padding:24px}
+#veil.hide{display:none}
+#veil .box{max-width:420px}
+#veil h2{font-family:'Archivo',sans-serif;font-weight:900;font-size:20px;margin-bottom:8px}
+#veil p{font-size:14px;color:var(--graphite)}
+.spin{width:26px;height:26px;border:2.5px solid var(--mist);border-top-color:var(--ink);border-radius:50%;margin:0 auto 14px;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+#panel{width:396px;flex:none;border-left:2px solid var(--ink);display:flex;flex-direction:column;background:var(--paper);min-height:0}
+.tabs{display:flex;border-bottom:1.5px solid var(--mist);flex:none}
+.tabs button{flex:1;font-family:inherit;font-size:13.5px;padding:11px 6px;background:none;border:0;border-bottom:2.5px solid transparent;color:var(--ash);cursor:pointer;font-weight:500}
+.tabs button.active{color:var(--ink);font-weight:700;border-bottom-color:var(--ink)}
+.tabs .badge{display:inline-block;min-width:18px;font-size:10.5px;font-family:'JetBrains Mono',monospace;background:var(--ink);color:var(--paper);border-radius:999px;padding:0 5px;margin-left:5px;vertical-align:1px}
+.pane{flex:1;overflow-y:auto;padding:14px;display:none}
+.pane.active{display:block}
+.empty{font-size:13px;color:var(--ash);text-align:center;padding:34px 10px;border:1.5px dashed var(--mist);border-radius:8px}
+
+/* quick actions */
+.qa-group{margin-bottom:18px}
+.qa-title{font-size:12px;font-weight:700;color:var(--ash);letter-spacing:.06em;margin-bottom:8px;text-transform:uppercase}
+.qa{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.qa button{font-family:inherit;font-size:13px;font-weight:700;text-align:left;background:var(--white);border:1.5px solid var(--ink);border-radius:7px;padding:9px 11px;cursor:pointer;line-height:1.35}
+.qa button:hover:not(:disabled){background:var(--ink);color:var(--paper)}
+.qa button:disabled{opacity:.4;cursor:default}
+.qa button small{display:block;font-weight:400;font-size:11px;opacity:.72;margin-top:2px}
+.qa.full{grid-template-columns:1fr}
+.note{font-size:12.5px;color:var(--graphite);background:var(--white);border:1.5px solid var(--mist);border-radius:7px;padding:10px 12px;margin-bottom:14px}
+.note b{color:var(--ink)}
+.cmd{background:var(--ink);color:var(--paper);border-radius:6px;padding:8px 10px;margin-top:8px;font-family:'JetBrains Mono',monospace;font-size:11.5px;overflow-x:auto;white-space:pre}
+
+/* timeline */
+.tl{list-style:none}
+.tl li{border-left:2px solid var(--mist);padding:0 0 14px 14px;position:relative}
+.tl li:last-child{padding-bottom:2px}
+.tl li::before{content:'';position:absolute;left:-6px;top:5px;width:10px;height:10px;border-radius:50%;background:var(--paper);border:2px solid var(--ash)}
+.tl li.done::before{background:var(--ink);border-color:var(--ink)}
+.tl li.running::before{border-color:var(--ink);animation:pulse 1s ease-in-out infinite}
+.tl li.error::before{background:var(--paper);border-color:var(--ink);box-shadow:0 0 0 2px var(--paper),0 0 0 3.5px var(--ink)}
+@keyframes pulse{50%{transform:scale(1.35)}}
+.tl .head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.tl .tool{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;border:1.5px solid var(--ink);border-radius:4px;padding:0 6px}
+.tl .who{font-size:10.5px;color:var(--ash);border:1.5px solid var(--mist);border-radius:4px;padding:0 5px}
+.tl .ms{font-size:11px;color:var(--ash);font-family:'JetBrains Mono',monospace;margin-left:auto}
+.tl .sum{font-size:13.5px;margin-top:3px}
+.tl .err{font-size:12.5px;color:var(--ink);border-left:2.5px solid var(--ink);padding-left:8px;margin-top:5px;background:var(--white)}
+.tl .files{font-size:12px;color:var(--graphite);margin-top:3px}
+
+/* gallery */
+.gal{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.card{border:1.5px solid var(--ink);border-radius:8px;overflow:hidden;background:var(--white)}
+.card .thumb{display:block;width:100%;height:104px;object-fit:contain;background:var(--mist);cursor:zoom-in}
+.card .meta{padding:6px 8px;font-size:11px;color:var(--graphite);display:flex;justify-content:space-between;align-items:center;gap:6px}
+.card .meta .mono{font-size:10.5px}
+.card .dl{font-family:inherit;font-size:11px;font-weight:700;border:1.5px solid var(--ink);background:var(--white);border-radius:5px;padding:2px 8px;cursor:pointer;text-decoration:none;color:var(--ink)}
+.card .dl:hover{background:var(--ink);color:var(--paper)}
+.gal-bar{display:flex;gap:8px;margin-bottom:12px}
+.gal-bar button{font-family:inherit;font-size:12.5px;font-weight:700;border:1.5px solid var(--ink);background:var(--white);border-radius:6px;padding:6px 12px;cursor:pointer}
+.gal-bar button:hover{background:var(--mist)}
+
+#lightbox{position:fixed;inset:0;background:rgba(17,17,17,.9);display:none;align-items:center;justify-content:center;z-index:50;padding:30px;cursor:zoom-out}
+#lightbox.show{display:flex}
+#lightbox img{max-width:100%;max-height:100%;object-fit:contain}
+
+@media (max-width:900px){
+  main{flex-direction:column}
+  #panel{width:100%;border-left:0;border-top:2px solid var(--ink);height:48%}
+  #stage{height:52%}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>ROOPSTUDIO</h1>
+    <span class="tag">สั่ง Photopea ด้วย AI — แล้วเห็นทุกขั้นที่มันทำ</span>
+    <span class="spacer"></span>
+    <span class="pill" id="p-ws"><span class="dot"></span>เชื่อมต่อ</span>
+    <span class="pill" id="p-pea"><span class="dot"></span>Photopea</span>
+    <span class="pill warn" id="p-mock" style="display:none">MOCK MODE</span>
+  </header>
+
+  <main>
+    <div id="stage">
+      <div id="veil"><div class="box">
+        <div class="spin"></div>
+        <h2>กำลังเปิด Photopea…</h2>
+        <p>ครั้งแรกอาจใช้เวลาสักครู่ ระหว่างนี้ AI จะรอจนพร้อมแล้วค่อยเริ่มทำงานให้เอง</p>
+      </div></div>
+      <iframe id="pea" title="Photopea"></iframe>
+    </div>
+
+    <aside id="panel">
+      <div class="tabs">
+        <button data-tab="actions" class="active">ปุ่มลัด</button>
+        <button data-tab="timeline">ไทม์ไลน์<span class="badge" id="b-tl">0</span></button>
+        <button data-tab="gallery">แกลเลอรี<span class="badge" id="b-gal">0</span></button>
+      </div>
+
+      <div class="pane active" id="pane-actions">
+        <div class="note">
+          กดปุ่มพวกนี้ทำเองได้เลย ไม่ต้องรอ AI — ทุกอย่างทำงานกับไฟล์ที่เปิดอยู่ใน Photopea
+          และผลลัพธ์ไปโผล่ที่แกลเลอรีเหมือนกัน
+        </div>
+        <div class="qa-group">
+          <div class="qa-title">Export</div>
+          <div class="qa" id="qa-export"></div>
+        </div>
+        <div class="qa-group">
+          <div class="qa-title">ขนาดโซเชียล (ครอปกลางให้เต็มกรอบ)</div>
+          <div class="qa" id="qa-sizes"></div>
+        </div>
+        <div class="qa-group">
+          <div class="qa-title">ฟอนต์ไทย &amp; อื่น ๆ</div>
+          <div class="qa full" id="qa-misc"></div>
+        </div>
+        <div class="note" id="mcp-hint" style="display:none"></div>
+      </div>
+
+      <div class="pane" id="pane-timeline"><div class="empty">ยังไม่มีงาน — สั่ง AI หรือกดปุ่มลัดได้เลย</div></div>
+      <div class="pane" id="pane-gallery"><div class="empty">ยังไม่มีไฟล์ที่ export</div></div>
+    </aside>
+  </main>
+</div>
+<div id="lightbox"><img alt="preview" /></div>
+
+<script>
+'use strict';
+var $ = function (id) { return document.getElementById(id); };
+var PRESETS = null, MOCK = false;
+var ws = null, wsOK = false, peaReady = false, reconnectMs = 800;
+var tl = [], gal = [], tlSeen = {};
+
+// ---------------------------------------------------------------------------
+// คิวคุย Photopea — งานเดียวต่อครั้ง ทั้งของ AI และของปุ่มลัดใช้คิวเดียวกัน
+// จึงกดปุ่มระหว่าง AI ทำงานได้โดยไม่ชนกัน (ต้นฉบับ upstream ไม่มีคิว)
+// ---------------------------------------------------------------------------
+var queue = [], busy = false, cur = null;
+
+function peaSend(payload) {
+  var f = $('pea');
+  if (f && f.contentWindow) f.contentWindow.postMessage(payload, '*');
+}
+
+function runOnPea(payload, opts) {
+  opts = opts || {};
+  return new Promise(function (resolve) {
+    queue.push({ payload: payload, expectFiles: !!opts.expectFiles, resolve: resolve, label: opts.label || '' });
+    pump();
+  });
+}
+
+function pump() {
+  if (busy || !queue.length || !peaReady) return;
+  busy = true;
+  cur = queue.shift();
+  cur.echoes = [];
+  cur.files = [];
+  cur.started = Date.now();
+  cur.timer = setTimeout(function () { finishOp('Photopea ไม่ตอบกลับภายใน 120 วินาที'); }, 120000);
+  peaSend(cur.payload);
+}
+
+var ERR_FLAG = '__ROOP_ERR__';
+
+function finishOp(error) {
+  if (!cur) return;
+  clearTimeout(cur.timer);
+  var op = cur; cur = null; busy = false;
+
+  // สคริปต์ที่ throw จะส่งธงนี้กลับมา (server ห่อ try/catch ให้ทุกสคริปต์)
+  var thrown = null;
+  var echoes = [];
+  op.echoes.forEach(function (e) {
+    if (e.indexOf(ERR_FLAG) === 0) thrown = e.slice(ERR_FLAG.length);
+    else echoes.push(e);
+  });
+
+  op.resolve({
+    ok: !error && !thrown,
+    error: error || (thrown ? 'สคริปต์ Photopea ผิดพลาด: ' + thrown : null),
+    echo: echoes.length ? echoes.join('\n') : null,
+    files: op.files, ms: Date.now() - op.started
+  });
+  setTimeout(pump, 0);
+}
+
+window.addEventListener('message', function (e) {
+  var f = $('pea');
+  if (!f || (f.contentWindow && e.source !== f.contentWindow)) return;
+
+  if (!peaReady) { setPeaReady(); return; }   // ข้อความแรกจาก Photopea = โหลดเสร็จ
+  if (!cur) return;
+
+  if (e.data instanceof ArrayBuffer) { cur.files.push(e.data); return; }
+  if (typeof e.data === 'string') {
+    if (e.data === 'done') finishOp(null);
+    else cur.echoes.push(e.data);
+  }
+});
+
+function setPeaReady() {
+  peaReady = true;
+  $('p-pea').classList.add('on');
+  $('veil').classList.add('hide');
+  if (wsOK) send({ type: 'status', status: 'ready' });
+  pump();
+}
+
+// ---------------------------------------------------------------------------
+// ชนิดไฟล์: Photopea ไม่บอกมา — ดูจากไบต์แรกเอา
+// ---------------------------------------------------------------------------
+function sniff(buf) {
+  var b = new Uint8Array(buf.slice(0, 12));
+  if (b[0] === 0x89 && b[1] === 0x50) return { mime: 'image/png', ext: 'png' };
+  if (b[0] === 0xff && b[1] === 0xd8) return { mime: 'image/jpeg', ext: 'jpg' };
+  if (b[0] === 0x52 && b[1] === 0x49 && b[8] === 0x57) return { mime: 'image/webp', ext: 'webp' };
+  if (b[0] === 0x38 && b[1] === 0x42 && b[2] === 0x50 && b[3] === 0x53) return { mime: 'image/vnd.adobe.photoshop', ext: 'psd' };
+  if (b[0] === 0x3c) return { mime: 'image/svg+xml', ext: 'svg' };
+  return { mime: 'application/octet-stream', ext: 'bin' };
+}
+
+function toB64(buf) {
+  var bytes = new Uint8Array(buf), s = '', CH = 0x8000;
+  for (var i = 0; i < bytes.length; i += CH) {
+    s += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+  }
+  return btoa(s);
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket กับ MCP server
+// ---------------------------------------------------------------------------
+function connect() {
+  var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  try { ws = new WebSocket(proto + '//' + location.host); } catch (e) { return retry(); }
+
+  ws.onopen = function () {
+    wsOK = true; reconnectMs = 800;
+    $('p-ws').classList.add('on');
+    if (peaReady) send({ type: 'status', status: 'ready' });
+  };
+  ws.onclose = function () { wsOK = false; $('p-ws').classList.remove('on'); retry(); };
+  ws.onerror = function () {};
+  ws.onmessage = function (ev) {
+    var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+    onServer(m);
+  };
+}
+function retry() { setTimeout(connect, reconnectMs); reconnectMs = Math.min(reconnectMs * 1.8, 8000); }
+function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
+
+function onServer(m) {
+  if (m.type === 'hello') {
+    if (m.mock) { MOCK = true; $('p-mock').style.display = ''; }
+    (m.history || []).forEach(addActivity);
+    return;
+  }
+  if (m.type === 'activity') { addActivity(m); return; }
+
+  if (m.type === 'execute') {
+    runOnPea(m.script, { expectFiles: m.expectFiles }).then(function (r) {
+      r.files.forEach(function (b) { addToGallery(b, m.tool); });
+      send({
+        id: m.id, type: 'result', success: r.ok, echo: r.echo, error: r.error,
+        files: r.files.map(function (b) { return { data: toB64(b), mimeType: sniff(b).mime }; })
+      });
+    });
+    return;
+  }
+
+  if (m.type === 'load') {
+    var bin = atob(m.data), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    runOnPea(bytes.buffer, {}).then(function (r) {
+      send({ id: m.id, type: 'result', success: r.ok, echo: r.echo, error: r.error, files: [] });
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ไทม์ไลน์
+// ---------------------------------------------------------------------------
+function addActivity(a) {
+  if (a.id && tlSeen[a.id] !== undefined) {
+    var idx = tlSeen[a.id];
+    tl[idx] = Object.assign({}, tl[idx], a);   // อัปเดตรายการเดิม running → done
+  } else {
+    if (a.id) tlSeen[a.id] = tl.length;
+    tl.push(a);
+  }
+  if (tl.length > 200) { tl.shift(); tlSeen = {}; tl.forEach(function (x, i) { if (x.id) tlSeen[x.id] = i; }); }
+  renderTimeline();
+}
+
+function renderTimeline() {
+  $('b-tl').textContent = tl.length;
+  var host = $('pane-timeline');
+  if (!tl.length) { host.innerHTML = '<div class="empty">ยังไม่มีงาน — สั่ง AI หรือกดปุ่มลัดได้เลย</div>'; return; }
+  var atBottom = host.scrollHeight - host.scrollTop - host.clientHeight < 60;
+  var html = '<ul class="tl">' + tl.map(function (a) {
+    var st = a.status || 'done';
+    return '<li class="' + st + '">' +
+      '<div class="head"><span class="tool">' + esc(a.tool || 'tool') + '</span>' +
+      (a.source === 'user' ? '<span class="who">คุณกดเอง</span>' : '<span class="who">AI</span>') +
+      (a.ms ? '<span class="ms">' + a.ms + 'ms</span>' : (st === 'running' ? '<span class="ms">กำลังทำ…</span>' : '')) +
+      '</div>' +
+      (a.summary ? '<div class="sum">' + esc(a.summary) + '</div>' : '') +
+      (a.files ? '<div class="files">ได้ไฟล์ ' + a.files + ' ไฟล์ → ดูในแกลเลอรี</div>' : '') +
+      (a.error ? '<div class="err">' + esc(a.error) + '</div>' : '') +
+      '</li>';
+  }).join('') + '</ul>';
+  host.innerHTML = html;
+  if (atBottom) host.scrollTop = host.scrollHeight;
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ---------------------------------------------------------------------------
+// แกลเลอรี
+// ---------------------------------------------------------------------------
+function addToGallery(buf, tool) {
+  var k = sniff(buf);
+  var blob = new Blob([buf], { type: k.mime });
+  var url = URL.createObjectURL(blob);
+  var n = gal.length + 1;
+  gal.push({ url: url, ext: k.ext, size: buf.byteLength, name: (tool || 'roop') + '-' + n + '.' + k.ext, w: 0, h: 0 });
+  if (k.mime.indexOf('image/') === 0 && k.ext !== 'psd') {
+    var im = new Image();
+    im.onload = function () {
+      var g = gal[n - 1];
+      if (g) { g.w = im.naturalWidth; g.h = im.naturalHeight; renderGallery(); }
+    };
+    im.src = url;
+  }
+  renderGallery();
+}
+
+function renderGallery() {
+  $('b-gal').textContent = gal.length;
+  var host = $('pane-gallery');
+  if (!gal.length) { host.innerHTML = '<div class="empty">ยังไม่มีไฟล์ที่ export</div>'; return; }
+  host.innerHTML =
+    '<div class="gal-bar"><button onclick="downloadAll()">ดาวน์โหลดทั้งหมด</button>' +
+    '<button onclick="clearGallery()">ล้าง</button></div>' +
+    '<div class="gal">' + gal.map(function (g, i) {
+      var thumb = (g.ext === 'psd' || g.ext === 'bin')
+        ? '<div class="thumb" style="display:flex;align-items:center;justify-content:center;font-family:JetBrains Mono,monospace;font-size:12px">' + g.ext.toUpperCase() + '</div>'
+        : '<img class="thumb" src="' + g.url + '" alt="" onclick="zoom(' + i + ')" />';
+      return '<div class="card">' + thumb +
+        '<div class="meta"><span class="mono">' + (g.w ? g.w + '×' + g.h : g.ext.toUpperCase()) + ' · ' + Math.max(1, Math.round(g.size / 1024)) + 'KB</span>' +
+        '<a class="dl" href="' + g.url + '" download="' + g.name + '">เซฟ</a></div></div>';
+    }).join('') + '</div>';
+}
+
+function zoom(i) { var lb = $('lightbox'); lb.querySelector('img').src = gal[i].url; lb.classList.add('show'); }
+function downloadAll() {
+  gal.forEach(function (g, i) {
+    setTimeout(function () {
+      var a = document.createElement('a'); a.href = g.url; a.download = g.name; a.click();
+    }, i * 220);
+  });
+}
+function clearGallery() { gal.forEach(function (g) { URL.revokeObjectURL(g.url); }); gal = []; renderGallery(); }
+
+// ---------------------------------------------------------------------------
+// ปุ่มลัด — รันสคริปต์เองผ่านคิวเดียวกัน แล้วรายงานเข้าไทม์ไลน์
+// ---------------------------------------------------------------------------
+var uiSeq = 0;
+
+function quick(tool, summary, script, expectFiles) {
+  var btns = document.querySelectorAll('#pane-actions button');
+  for (var i = 0; i < btns.length; i++) btns[i].disabled = true;
+
+  // id เดียวกันตลอด — ทั้งตอน running, ตอนจบ, และตอน server สะท้อนกลับมา
+  // จึงเป็นรายการเดียวใน timeline ไม่ใช่สามรายการ
+  var id = 'ui-' + (++uiSeq) + '-' + Date.now();
+  addActivity({ id: id, tool: tool, summary: summary, status: 'running', source: 'user' });
+
+  return runOnPea(script, { expectFiles: !!expectFiles }).then(function (r) {
+    r.files.forEach(function (b) { addToGallery(b, tool); });
+    addActivity({
+      id: id, tool: tool, summary: summary, source: 'user',
+      status: r.ok ? 'done' : 'error', ms: r.ms, error: r.error,
+      files: r.files.length || undefined,
+    });
+    send({ type: 'ui-activity', id: id, tool: tool, summary: summary, status: r.ok ? 'done' : 'error', ms: r.ms });
+    if (r.echo && tool === 'doc_info') alert(r.echo);
+    for (var i2 = 0; i2 < btns.length; i2++) btns[i2].disabled = false;
+    return r;
+  });
+}
+
+var S = {
+  exportDoc: function (fmt) { return "app.activeDocument.saveToOE('" + fmt + "');"; },
+  docInfo: "function _n(v){return parseFloat(String(v));}var _d=app.activeDocument;app.echoToOE('ชื่อ: '+_d.name+'\\nขนาด: '+_n(_d.width)+'×'+_n(_d.height)+'\\nเลเยอร์: '+_d.layers.length);",
+  undo: "var _h=app.activeDocument.historyStates;app.activeDocument.activeHistoryState=_h[Math.max(0,_h.length-2)];app.echoToOE('ok');",
+  cover: function (w, h, fmt) {
+    return "function _n(v){return parseFloat(String(v));}" +
+      "var _b=app.activeDocument;var _d=_b.duplicate('__roop_tmp_q');app.activeDocument=_d;" +
+      "var _w=_n(_d.width),_hh=_n(_d.height);var _s=Math.max(" + w + "/_w," + h + "/_hh);" +
+      "_d.resizeImage(Math.round(_w*_s),Math.round(_hh*_s),null,ResampleMethod.BICUBIC);" +
+      "_d.resizeCanvas(" + w + "," + h + ",AnchorPosition.MIDDLECENTER);" +
+      "_d.saveToOE('" + fmt + "');app.activeDocument=_b;";
+  },
+  closeTemps: "for(var i=app.documents.length-1;i>=0;i--){var _d=app.documents[i];if(_d.name.indexOf('__roop_tmp')===0){app.activeDocument=_d;_d.close(SaveOptions.DONOTSAVECHANGES);}}app.echoToOE('ok');",
+  loadFont: function (url) {
+    return "var _p=app.documents.length>0?app.activeDocument.name:null;app.open('" + url + "');" +
+      "if(_p){try{app.activeDocument=app.documents.getByName(_p);}catch(e){}}app.echoToOE('ok');";
+  }
+};
+
+function buildActions() {
+  $('qa-export').innerHTML =
+    btn('export_png', 'PNG', 'ไฟล์ที่เปิดอยู่') +
+    btn('export_jpg', 'JPG 90%', 'เล็กกว่า เหมาะกับรูปถ่าย');
+
+  var sizes = PRESETS.socialSizes, html = '';
+  Object.keys(sizes).forEach(function (k) {
+    html += btn('size_' + k, k.toUpperCase(), sizes[k].width + '×' + sizes[k].height);
+  });
+  html += btn('size_all', 'ชุดมาตรฐาน', PRESETS.defaultSet.join(' + '));
+  $('qa-sizes').innerHTML = html;
+
+  $('qa-misc').innerHTML =
+    btn('load_thai', 'โหลดฟอนต์ไทยเข้า Photopea', 'IBM Plex Sans Thai + Sarabun — จำเป็นถ้าจะพิมพ์ไทย') +
+    btn('undo', 'ย้อน 1 ขั้น', 'ยกเลิกสิ่งที่เพิ่งทำ') +
+    btn('doc_info', 'ดูข้อมูลไฟล์ที่เปิดอยู่', 'ขนาด · จำนวนเลเยอร์');
+
+  document.querySelectorAll('#pane-actions button').forEach(function (b) {
+    b.addEventListener('click', function () { onAction(b.getAttribute('data-a')); });
+  });
+}
+function btn(id, label, hint) {
+  return '<button data-a="' + id + '">' + label + '<small>' + hint + '</small></button>';
+}
+
+function onAction(a) {
+  if (a === 'export_png') return quick('export', 'Export PNG', S.exportDoc('png'), true);
+  if (a === 'export_jpg') return quick('export', 'Export JPG 90%', S.exportDoc('jpg:0.9'), true);
+  if (a === 'undo') return quick('undo', 'ย้อน 1 ขั้น', S.undo);
+  if (a === 'doc_info') return quick('doc_info', 'ดูข้อมูลไฟล์', S.docInfo);
+  if (a === 'load_thai') {
+    var fonts = [PRESETS.thaiFonts.plex.regular, PRESETS.thaiFonts.plex.bold, PRESETS.thaiFonts.sarabun.regular];
+    var chain = Promise.resolve();
+    fonts.forEach(function (f) {
+      chain = chain.then(function () {
+        return new Promise(function (res) {
+          quick('load_font', 'โหลดฟอนต์ ' + f.postScriptName, S.loadFont(f.url));
+          setTimeout(res, 900);
+        });
+      });
+    });
+    return chain;
+  }
+  if (a === 'size_all') {
+    var keys = PRESETS.defaultSet;
+    var script = keys.map(function (k) {
+      var s = PRESETS.socialSizes[k];
+      return S.cover(s.width, s.height, 'png');
+    }).join('\n');
+    quick('export_set', 'Export ชุดมาตรฐาน: ' + keys.join(', '), script, true);
+    setTimeout(function () { quick('cleanup', 'ปิดเอกสารชั่วคราว', S.closeTemps); }, 600);
+    return;
+  }
+  if (a.indexOf('size_') === 0) {
+    var key = a.slice(5), sz = PRESETS.socialSizes[key];
+    quick('export_size', 'Export ' + key + ' ' + sz.width + '×' + sz.height, S.cover(sz.width, sz.height, 'png'), true);
+    setTimeout(function () { quick('cleanup', 'ปิดเอกสารชั่วคราว', S.closeTemps); }, 600);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// bootstrap
+// ---------------------------------------------------------------------------
+document.querySelectorAll('.tabs button').forEach(function (b) {
+  b.addEventListener('click', function () {
+    document.querySelectorAll('.tabs button').forEach(function (x) { x.classList.remove('active'); });
+    document.querySelectorAll('.pane').forEach(function (x) { x.classList.remove('active'); });
+    b.classList.add('active');
+    $('pane-' + b.getAttribute('data-tab')).classList.add('active');
+  });
+});
+$('lightbox').addEventListener('click', function () { $('lightbox').classList.remove('show'); });
+
+fetch('/api/presets').then(function (r) { return r.json(); }).then(function (p) {
+  PRESETS = p; MOCK = !!p.mock;
+  buildActions();
+  if (MOCK) {
+    $('p-mock').style.display = '';
+    $('pea').src = '/mock.html';
+    $('mcp-hint').style.display = '';
+    $('mcp-hint').innerHTML = '<b>โหมด mock</b> — ใช้ Photopea ปลอมสำหรับทดสอบ/เดโมแบบไม่ต้องต่อเน็ต ' +
+      'ปิดโหมดนี้ด้วยการรันโดยไม่ใส่ <span class="mono">--mock</span>';
+  } else {
+    $('pea').src = 'https://www.photopea.com#' + encodeURIComponent(JSON.stringify({ environment: {} }));
+  }
+  connect();
+});
+</script>
+</body>
+</html>
