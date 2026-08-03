@@ -243,6 +243,28 @@ _layer.translate(${x} - _num(_b[0]), ${y} - _num(_b[1]));` : ''}
 app.echoToOE('ok');`.trim());
 }
 
+/**
+ * หลังจากส่ง ArrayBuffer (ผลตัดพื้นหลัง) เข้า Photopea แล้ว มันเปิดเป็นเอกสารใหม่
+ * สคริปต์นี้ paste เนื้อหานั้นเข้าไปในเอกสารเป้าหมายเป็นเลเยอร์บนสุด แล้วลบเลเยอร์เดิม
+ * ทั้งหมดทิ้ง — ผลคือเอกสารเดิม (ชื่อ/ขนาดเดิม) เหลือแค่ภาพที่ตัดพื้นหลังแล้วชั้นเดียว
+ */
+export function replaceWithLoaded({ targetName, layerName = 'cutout' }) {
+  return withHelpers(`
+var _src = app.activeDocument;
+_src.selection.selectAll();
+_src.selection.copy(true);
+_src.close(SaveOptions.DONOTSAVECHANGES);
+app.activeDocument = app.documents.getByName('${esc(targetName)}');
+var _tgt = app.activeDocument;
+_tgt.paste();
+var _new = _tgt.activeLayer;
+_new.name = '${esc(layerName)}';
+for (var i = _tgt.layers.length - 1; i >= 0; i--) {
+  if (_tgt.layers[i] !== _new) _tgt.layers[i].remove();
+}
+app.echoToOE('ok');`.trim());
+}
+
 export function adjust({ brightness, contrast, desaturate: desat, invert }) {
   const lines = [`var _l = app.activeDocument.activeLayer;`];
   if (brightness !== undefined || contrast !== undefined) {
@@ -252,6 +274,136 @@ export function adjust({ brightness, contrast, desaturate: desat, invert }) {
   if (invert) lines.push(`_l.invert();`);
   lines.push(`app.echoToOE('ok');`);
   return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Layer — จัดการเลเยอร์ (list/add/duplicate/rename/delete/select/reorder/set)
+// ทุกฟังก์ชันอ้างเลเยอร์ด้วยชื่อ (artLayers.getByName) ไม่รองรับ layer group/ซ้อนโฟลเดอร์
+// ---------------------------------------------------------------------------
+
+const BLEND_MODES = {
+  normal: 'NORMAL', multiply: 'MULTIPLY', screen: 'SCREEN', overlay: 'OVERLAY',
+  darken: 'DARKEN', lighten: 'LIGHTEN', colorDodge: 'COLORDODGE', colorBurn: 'COLORBURN',
+  hardLight: 'HARDLIGHT', softLight: 'SOFTLIGHT', difference: 'DIFFERENCE',
+  exclusion: 'EXCLUSION', hue: 'HUE', saturation: 'SATURATION', color: 'COLOR', luminosity: 'LUMINOSITY',
+};
+
+export function layerList() {
+  return withHelpers(`
+var _d = app.activeDocument;
+var _out = [];
+for (var i = 0; i < _d.layers.length; i++) {
+  var _l = _d.layers[i];
+  _out.push({
+    name: _l.name, index: i, visible: _l.visible,
+    opacity: _num(_l.opacity), blendMode: String(_l.blendMode),
+    locked: !!_l.allLocked, isBackground: !!_l.isBackgroundLayer,
+    kind: String(_l.kind),
+  });
+}
+app.echoToOE(JSON.stringify(_out));`.trim());
+}
+
+export function layerAdd({ name = 'layer' }) {
+  return [
+    `var _l = app.activeDocument.artLayers.add();`,
+    `_l.name = '${esc(name)}';`,
+    `app.echoToOE('ok');`,
+  ].join('\n');
+}
+
+export function layerDuplicate({ name, newName }) {
+  return [
+    `var _l = app.activeDocument.artLayers.getByName('${esc(name)}');`,
+    `var _c = _l.duplicate();`,
+    newName ? `_c.name = '${esc(newName)}';` : '',
+    `app.echoToOE('ok');`,
+  ].filter(Boolean).join('\n');
+}
+
+export function layerDelete({ name }) {
+  return [
+    `app.activeDocument.artLayers.getByName('${esc(name)}').remove();`,
+    `app.echoToOE('ok');`,
+  ].join('\n');
+}
+
+/** เลเยอร์ "Background" จริง (isBackgroundLayer) เปลี่ยนชื่อไม่ติด นอกจากปลดล็อกก่อน
+ *  (เจอจริงตอนทดสอบ: .name = 'x' รันผ่านไม่ throw แต่ชื่อไม่เปลี่ยน) */
+export function layerRename({ name, newName }) {
+  return [
+    `var _l = app.activeDocument.artLayers.getByName('${esc(name)}');`,
+    `if (_l.isBackgroundLayer) _l.isBackgroundLayer = false;`,
+    `_l.name = '${esc(newName)}';`,
+    `app.echoToOE('ok');`,
+  ].join('\n');
+}
+
+export function layerSelect({ name }) {
+  return [
+    `app.activeDocument.activeLayer = app.activeDocument.artLayers.getByName('${esc(name)}');`,
+    `app.echoToOE('ok');`,
+  ].join('\n');
+}
+
+/** ย้ายลำดับเลเยอร์ — ขึ้น/ลงหนึ่งขั้น (สลับกับเลเยอร์ข้าง ๆ) หรือไปสุดบน/สุดล่าง
+ *  index 0 = บนสุด (เรียงแบบเดียวกับ layers panel) */
+export function layerReorder({ name, direction }) {
+  if (!['up', 'down', 'top', 'bottom'].includes(direction)) {
+    throw new Error(`ไม่รู้จัก direction "${direction}"`);
+  }
+  return withHelpers(`
+var _d = app.activeDocument;
+var _l = _d.artLayers.getByName('${esc(name)}');
+var _idx = -1;
+for (var i = 0; i < _d.layers.length; i++) { if (_d.layers[i] === _l) { _idx = i; break; } }
+var _dir = '${direction}';
+if (_dir === 'up' && _idx > 0) {
+  _l.move(_d.layers[_idx - 1], ElementPlacement.PLACEBEFORE);
+} else if (_dir === 'down' && _idx < _d.layers.length - 1) {
+  _l.move(_d.layers[_idx + 1], ElementPlacement.PLACEAFTER);
+} else if (_dir === 'top') {
+  _l.move(_d, ElementPlacement.PLACEATBEGINNING);
+} else if (_dir === 'bottom') {
+  _l.move(_d, ElementPlacement.PLACEATEND);
+}
+app.echoToOE('ok');`.trim());
+}
+
+export function layerSet({ name, visible, opacity, blendMode, locked }) {
+  const l = `app.activeDocument.artLayers.getByName('${esc(name)}')`;
+  const lines = [];
+  if (visible !== undefined) lines.push(`${l}.visible = ${!!visible};`);
+  if (opacity !== undefined) lines.push(`${l}.opacity = ${opacity};`);
+  if (blendMode !== undefined) {
+    const bm = BLEND_MODES[blendMode];
+    if (!bm) throw new Error(`ไม่รู้จัก blendMode "${blendMode}"`);
+    lines.push(`${l}.blendMode = BlendMode.${bm};`);
+  }
+  if (locked !== undefined) lines.push(`${l}.allLocked = ${!!locked};`);
+  lines.push(`app.echoToOE('ok');`);
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Filter — เอฟเฟกต์บนเลเยอร์ที่กำลังเลือกอยู่ (ArtLayer.applyXxx ตรง ๆ ไม่ผ่าน
+// ActionManager เพื่อเลี่ยง dialog ค้าง เหมือนกติกาของกลุ่ม selection ด้านบน)
+// ---------------------------------------------------------------------------
+
+export function filter({ type, amount, radius, threshold, angle, monochromatic }) {
+  const l = 'app.activeDocument.activeLayer';
+  const line = {
+    gaussianBlur: `${l}.applyGaussianBlur(${radius ?? 5});`,
+    sharpen: `${l}.applySharpen();`,
+    sharpenMore: `${l}.applySharpenMore();`,
+    unsharpMask: `${l}.applyUnSharpMask(${amount ?? 50}, ${radius ?? 2}, ${threshold ?? 0});`,
+    addNoise: `${l}.applyAddNoise(${amount ?? 10}, ${monochromatic ? 'NoiseDistribution.GAUSSIAN' : 'NoiseDistribution.UNIFORM'}, ${!!monochromatic});`,
+    motionBlur: `${l}.applyMotionBlur(${angle ?? 0}, ${radius ?? 10});`,
+    highPass: `${l}.applyHighPass(${radius ?? 10});`,
+    despeckle: `${l}.applyDespeckle();`,
+  }[type];
+  if (!line) throw new Error(`ไม่รู้จัก filter "${type}"`);
+  return `${line}\napp.echoToOE('ok');`;
 }
 
 // ---------------------------------------------------------------------------

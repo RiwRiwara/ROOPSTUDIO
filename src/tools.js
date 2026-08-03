@@ -10,6 +10,7 @@ import * as P from './photopea.js';
 import { buildCover } from './cover.js';
 import { SOCIAL_SIZES, DEFAULT_SET, THAI_FONTS, COVER_THEMES } from './presets.js';
 import { readSource, writeOut, extFor, expandPath } from './files.js';
+import { removeBackgroundToPng } from './bgremove.js';
 import { basename, join } from 'path';
 
 const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'ใช้รูปแบบ #rrggbb');
@@ -305,6 +306,127 @@ export function registerTools(server, bridge) {
   }, async (a) => {
     const r = await bridge.run(P.addRect(a), { tool: 'add_rect', summary: `สี่เหลี่ยม ${a.width}×${a.height}` });
     return r.ok ? ok('วาดสี่เหลี่ยมแล้ว') : fail(r.error);
+  });
+
+  server.registerTool('roop_remove_background', {
+    title: 'ตัดพื้นหลังด้วย AI (รันในเครื่อง)',
+    description:
+      'ตัดพื้นหลังออกจากรูปด้วยโมเดล AI ที่รันในเครื่อง (ไม่ผ่าน API ภายนอก หลังโหลดโมเดลครั้งแรกใช้งานออฟไลน์ได้) ' +
+      'ทำ matting จริง ขอบขนสัตว์/เส้นผมฟุ้งได้ตามภาพจริง — ต่างจาก roop_magic_wand ที่ตัดตามสีเท่านั้น ' +
+      'เหมาะกับพื้นหลังซับซ้อน (ท้องฟ้า กิ่งไม้ ฉากเปิด) ที่ magic wand ทำไม่ได้ผลดี ' +
+      'ไม่ระบุ source = ตัดเอกสารที่เปิดอยู่ตอนนี้แล้วแทนที่เลเยอร์เดิมด้วยผลลัพธ์ (ชื่อ/ขนาดเอกสารเดิม) ' +
+      'ระบุ source = เปิดรูปนั้นเป็นเอกสารใหม่ที่ตัดพื้นหลังแล้วเลย',
+    inputSchema: {
+      source: z.string().optional().describe('พาธไฟล์ในเครื่องหรือ URL — ถ้าไม่ระบุจะใช้เอกสารที่เปิดอยู่ตอนนี้'),
+      model: z.enum(['small', 'medium', 'large']).optional()
+        .describe('ขนาดโมเดล — small เร็วสุด/หยาบสุด, large แม่นสุด/ช้าสุด (ค่าเริ่มต้น medium)'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  }, async (a) => {
+    const model = a.model || 'medium';
+    let srcBuf, targetName = null;
+
+    if (a.source) {
+      try { srcBuf = await readSource(a.source); } catch (e) { return fail(e.message); }
+    } else {
+      const info = await bridge.run(P.documentInfo(), { tool: 'document_info', summary: 'อ่านเอกสารเป้าหมาย' });
+      if (!info.ok) return fail('ไม่มีเอกสารเปิดอยู่ — ระบุ source หรือเปิดรูปก่อนด้วย roop_open_image');
+      try { targetName = JSON.parse(info.echo).name; } catch { return fail('อ่านชื่อเอกสารไม่ได้'); }
+      const exp = await bridge.run(P.exportDoc({ format: 'png' }), {
+        expectFiles: true, tool: 'remove_background', summary: 'export เอกสารปัจจุบันเพื่อตัดพื้นหลัง',
+      });
+      if (!exp.ok || !exp.files.length) return fail(exp.error || 'export เอกสารปัจจุบันไม่สำเร็จ');
+      srcBuf = exp.files[0].data;
+    }
+
+    let cutout;
+    try {
+      cutout = await removeBackgroundToPng(srcBuf, { model });
+    } catch (e) {
+      return fail(`ตัดพื้นหลังไม่สำเร็จ: ${e.message}`);
+    }
+
+    const load = await bridge.load(cutout, 'cutout.png');
+    if (!load.ok) return fail(load.error || 'ส่งผลลัพธ์เข้า Photopea ไม่สำเร็จ');
+
+    if (targetName) {
+      const r = await bridge.run(P.replaceWithLoaded({ targetName }), {
+        tool: 'remove_background', summary: 'แทนที่เอกสารเดิมด้วยผลตัดพื้นหลัง',
+      });
+      if (!r.ok) return fail(r.error);
+      return ok(`ตัดพื้นหลังแล้ว (โมเดล ${model}) — แทนที่เลเยอร์เดิมในเอกสาร "${targetName}"`);
+    }
+    return ok(`ตัดพื้นหลังแล้ว (โมเดล ${model}) — เปิดเป็นเอกสารใหม่`);
+  });
+
+  server.registerTool('roop_layer', {
+    title: 'จัดการเลเยอร์',
+    description:
+      'list/add/duplicate/rename/delete/select/reorder/set ของเลเยอร์ในเอกสารที่เปิดอยู่ ' +
+      '(อ้างเลเยอร์ด้วยชื่อ — ไม่รองรับ layer group ซ้อนโฟลเดอร์)',
+    inputSchema: {
+      action: z.enum(['list', 'add', 'duplicate', 'rename', 'delete', 'select', 'reorder', 'set']),
+      name: z.string().optional().describe('ชื่อเลเยอร์เป้าหมาย — ต้องระบุทุก action ยกเว้น list/add'),
+      newName: z.string().optional().describe('ชื่อใหม่ — ใช้กับ rename/duplicate'),
+      direction: z.enum(['up', 'down', 'top', 'bottom']).optional().describe('ใช้กับ reorder'),
+      visible: z.boolean().optional().describe('ใช้กับ set'),
+      opacity: z.number().min(0).max(100).optional().describe('ใช้กับ set'),
+      blendMode: z.enum([
+        'normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten',
+        'colorDodge', 'colorBurn', 'hardLight', 'softLight', 'difference',
+        'exclusion', 'hue', 'saturation', 'color', 'luminosity',
+      ]).optional().describe('ใช้กับ set'),
+      locked: z.boolean().optional().describe('ใช้กับ set'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  }, async (a) => {
+    const needName = a.action !== 'list' && a.action !== 'add';
+    if (needName && !a.name) return fail(`action "${a.action}" ต้องระบุ name`);
+    if (a.action === 'reorder' && !a.direction) return fail('action reorder ต้องระบุ direction');
+
+    let script;
+    try {
+      script = {
+        list: () => P.layerList(),
+        add: () => P.layerAdd({ name: a.name || 'layer' }),
+        duplicate: () => P.layerDuplicate({ name: a.name, newName: a.newName }),
+        rename: () => { if (!a.newName) throw new Error('action rename ต้องระบุ newName'); return P.layerRename({ name: a.name, newName: a.newName }); },
+        delete: () => P.layerDelete({ name: a.name }),
+        select: () => P.layerSelect({ name: a.name }),
+        reorder: () => P.layerReorder({ name: a.name, direction: a.direction }),
+        set: () => P.layerSet(a),
+      }[a.action]();
+    } catch (e) { return fail(e.message); }
+
+    const r = await bridge.run(script, { tool: 'layer', summary: `layer ${a.action}${a.name ? ` "${a.name}"` : ''}` });
+    if (!r.ok) return fail(r.error);
+    if (a.action === 'list') {
+      let list;
+      try { list = JSON.parse(r.echo); } catch { return fail('อ่านรายชื่อเลเยอร์ไม่ได้'); }
+      return ok(JSON.stringify(list, null, 2));
+    }
+    return ok(`layer ${a.action} สำเร็จ`);
+  });
+
+  server.registerTool('roop_filter', {
+    title: 'ใส่เอฟเฟกต์ภาพ (filter)',
+    description:
+      'ใส่ filter บนเลเยอร์ที่กำลังเลือกอยู่ (เลือกด้วย roop_layer action select ก่อนถ้าไม่ใช่เลเยอร์ปัจจุบัน) — ' +
+      'gaussianBlur/sharpen/sharpenMore/unsharpMask/addNoise/motionBlur/highPass/despeckle',
+    inputSchema: {
+      type: z.enum(['gaussianBlur', 'sharpen', 'sharpenMore', 'unsharpMask', 'addNoise', 'motionBlur', 'highPass', 'despeckle']),
+      radius: z.number().min(0).optional().describe('ใช้กับ gaussianBlur/unsharpMask/motionBlur/highPass'),
+      amount: z.number().min(0).optional().describe('ใช้กับ unsharpMask (%) หรือ addNoise (%)'),
+      threshold: z.number().min(0).max(255).optional().describe('ใช้กับ unsharpMask'),
+      angle: z.number().min(-360).max(360).optional().describe('ใช้กับ motionBlur (องศา)'),
+      monochromatic: z.boolean().optional().describe('ใช้กับ addNoise'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, async (a) => {
+    let script;
+    try { script = P.filter(a); } catch (e) { return fail(e.message); }
+    const r = await bridge.run(script, { tool: 'filter', summary: `filter: ${a.type}` });
+    return r.ok ? ok(`ใส่ filter ${a.type} แล้ว`) : fail(r.error);
   });
 
   server.registerTool('roop_select', {

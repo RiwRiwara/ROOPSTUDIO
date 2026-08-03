@@ -3,20 +3,8 @@
 MCP server ที่ให้ AI สั่ง **Photopea** (Photoshop ในเบราว์เซอร์ ใช้ฟรี) แต่งรูปให้ —
 พร้อม **หน้า Studio ที่เห็นทุกขั้นที่ AI ทำ และกดทำเองได้ด้วย**
 
-ต่อยอดจาก [attalla1/photopea-mcp-server](https://github.com/attalla1/photopea-mcp-server) (MIT)
+แรงบันดาลใจจาก [attalla1/photopea-mcp-server](https://github.com/attalla1/photopea-mcp-server) (MIT)
 ซึ่งพิสูจน์ว่าสถาปัตยกรรม MCP → WebSocket → postMessage → Photopea ใช้ได้จริง
-
-## ต่างจากต้นทางตรงไหน
-
-| | ต้นทาง | RoopStudio |
-|---|---|---|
-| หน้าเว็บ | สะพานเปล่า ๆ (สถานะ + log) | Studio: ไทม์ไลน์ภาษาไทย, แกลเลอรีรูปที่ export, ปุ่มลัดกดเอง |
-| tools | 34 คำสั่งดิบ | 16 — มี**คำสั่งระดับงาน** เช่น ทำภาพปกโพสต์ครบทุกขนาดในคำสั่งเดียว |
-| ภาษาไทย | ไม่มี | โหลดฟอนต์ไทยให้อัตโนมัติ + UI ไทย + สูตรจัดหน้าที่เผื่อความสูงบรรทัดไทย |
-| ไฟล์ต่อหนึ่งงาน | 1 ไฟล์ | หลายไฟล์ (export หลายขนาดในสคริปต์เดียว) |
-| สคริปต์พัง | รายงานว่า "สำเร็จ" | ห่อ try/catch แล้วรายงานข้อความ error จริง |
-| คิวงาน | ไม่มี — ผู้ใช้แตะอะไรระหว่าง AI ทำงานแล้วชนกัน | คิวเดียวฝั่งเบราว์เซอร์ ทั้งงาน AI และปุ่มที่คนกด |
-| ทดสอบ/เดโม | ต้องต่อเน็ต + Photopea จริง | มี `--mock` จำลอง Photopea ทั้ง object model รันออฟไลน์ได้ |
 
 > **คู่มือใช้งานเต็ม + ตัวอย่างสั่งงานจริง + วิธีต่อกับ Claude Code / Claude Desktop:
 > [USAGE.md](USAGE.md)**
@@ -63,12 +51,43 @@ node src/index.js --port 5000
 ## Tools
 
 **งานสำเร็จรูป** — `roop_make_post_cover` (ภาพปกโพสต์ทุกขนาด จัดหน้าใหม่ต่อขนาด
-ตัวหนังสือจึงไม่โดนครอป), `roop_export_social_set` (ภาพเดียว → หลายขนาด ครอปกลาง)
+ตัวหนังสือจึงไม่โดนครอป), `roop_export_social_set` (ภาพเดียว → หลายขนาด ครอปกลาง),
+`roop_remove_background` (ตัดพื้นหลังด้วย AI ในคำสั่งเดียว — ดูหัวข้อด้านล่าง)
 
-**ชิ้นส่วน** — `roop_status`, `roop_create_document`, `roop_document_info`,
+**เลเยอร์ / เอฟเฟกต์** — `roop_layer` (list/add/duplicate/rename/delete/select/reorder/set
+opacity-blendMode-visible-lock ของเลเยอร์ — ระบุ `action`), `roop_filter`
+(gaussianBlur/sharpen/sharpenMore/unsharpMask/addNoise/motionBlur/highPass/despeckle
+บนเลเยอร์ที่กำลังเลือกอยู่)
+
+**Selection** — `roop_select` (rect/ellipse/polygon/all), `roop_magic_wand`
+(เลือกตามสีใกล้เคียง เหมาะกับพื้นหลังสีล้วน), `roop_modify_selection`
+(expand/contract/feather/invert), `roop_fill_selection`, `roop_erase_selection`,
+`roop_deselect`
+
+**ชิ้นส่วนอื่น** — `roop_status`, `roop_create_document`, `roop_document_info`,
 `roop_open_image`, `roop_place_image`, `roop_add_text`, `roop_add_rect`,
 `roop_adjust`, `roop_resize`, `roop_export`, `roop_load_thai_fonts`,
 `roop_list_fonts`, `roop_undo`, `roop_run_script`
+
+## ตัดพื้นหลังด้วย AI (`roop_remove_background`)
+
+`roop_magic_wand` ใช้ได้ดีเฉพาะพื้นหลังสีล้วน/ใกล้เคียงกัน (เช่นฉากสตูดิโอ) —
+พื้นหลังซับซ้อนอย่างท้องฟ้า กิ่งไม้ หรือฉากเปิด ต้องนั่งลากหลายเหลี่ยมเอง ได้ขอบไม่เนียน
+`roop_remove_background` แก้ปัญหานี้ด้วยโมเดล AI (ผ่าน [`@imgly/background-removal-node`](https://github.com/imgly/background-removal-js),
+ONNX รันบน `onnxruntime-node`) ทำ **matting จริง** — ขอบขนสัตว์/เส้นผมฟุ้งได้ตามภาพจริง
+ไม่ใช่แค่ threshold สี
+
+- ไม่ระบุ `source` → ตัดเอกสารที่เปิดอยู่ตอนนี้ แล้วแทนที่เลเยอร์เดิมด้วยผลลัพธ์
+  (ชื่อ/ขนาดเอกสารเดิม พร้อม export ต่อได้เลย)
+- ระบุ `source` (พาธไฟล์/URL) → เปิดรูปนั้นเป็นเอกสารใหม่ที่ตัดพื้นหลังแล้ว
+- เลือกขนาดโมเดลด้วย `model`: `small` (เร็ว/หยาบ) · `medium` (ค่าเริ่มต้น) · `large` (แม่น/ช้า)
+
+**ครั้งแรกที่เรียกต้องต่อเน็ต** เพื่อดาวน์โหลดน้ำหนักโมเดล (แคชไว้ในเครื่องอัตโนมัติ)
+หลังจากนั้นรันได้แบบออฟไลน์ทั้งหมด — ไฟล์ภาพไม่ถูกส่งออกไปที่ไหนเลย ประมวลผลในเครื่องล้วน ๆ
+
+ติดตั้งครั้งแรกอาจต้องคอมไพล์/ดาวน์โหลด native binary ของ `sharp` และ `onnxruntime-node`
+— `pnpm-workspace.yaml` อนุมัติ build script ของสองแพ็กเกจนี้ไว้ล่วงหน้าแล้ว (`allowBuilds`)
+ถ้าใช้ npm/yarn แทน pnpm อาจต้องอนุมัติ postinstall เอง
 
 ## ทำไมต้องโหลดฟอนต์ไทยเอง
 
@@ -80,13 +99,19 @@ Sarabun, Kanit, Prompt) — ใช้ไฟล์ TTF ไม่ใช่ woff2 �
 ## ความปลอดภัย
 
 server ฟังเฉพาะ `127.0.0.1` · ไฟล์ที่อ่าน/เขียนคือพาธที่ระบุในคำสั่งเท่านั้น ·
-รูปทั้งหมดประมวลผลในเบราว์เซอร์ของคุณกับ Photopea ไม่ผ่านเซิร์ฟเวอร์ใครทั้งนั้น
+รูปทั้งหมดประมวลผลในเบราว์เซอร์ของคุณกับ Photopea ไม่ผ่านเซิร์ฟเวอร์ใครทั้งนั้น ·
+`roop_remove_background` ก็เช่นกัน — โมเดล AI รันในเครื่อง (ผ่าน `onnxruntime-node`)
+เน็ตถูกใช้แค่ครั้งแรกตอนดาวน์โหลดน้ำหนักโมเดลมาแคช ไม่มีภาพหลุดออกไปไหน
 
 ## ที่ยังต้องยืนยันกับ Photopea จริง
 
 โค้ดทั้งหมดทดสอบผ่าน mock ที่ล้อ object model ของ Photopea (สคริปต์ที่ผิดพลาดจะพัง
 ตั้งแต่ตรงนั้น) แต่สามข้อนี้ต้องลองกับของจริง: ลำดับการส่งไฟล์เมื่อ `saveToOE` หลายครั้ง
 ในสคริปต์เดียว, ชื่อ PostScript ของฟอนต์หลังโหลด และผลการเรนเดอร์สระ/วรรณยุกต์ไทย
+
+โมเดลตัดพื้นหลังของ `roop_remove_background` (ส่วน Node ล้วน ไม่แตะ Photopea) ทดสอบแล้วว่า
+ได้ผลลัพธ์ PNG ที่มี alpha จริง — แต่ `replaceWithLoaded`, `roop_layer`, และ `roop_filter`
+(ส่วนที่ต้องรันสคริปต์ผ่าน Photopea จริง) ยังทดสอบแค่ผ่าน mock ยังไม่ได้ยืนยันกับ Photopea จริง
 
 ## License
 
