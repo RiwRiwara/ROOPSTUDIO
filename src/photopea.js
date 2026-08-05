@@ -288,17 +288,23 @@ const BLEND_MODES = {
   exclusion: 'EXCLUSION', hue: 'HUE', saturation: 'SATURATION', color: 'COLOR', luminosity: 'LUMINOSITY',
 };
 
-export function layerList() {
+/** ครอบคลุมทั้ง list เดี่ยว (ไม่ระบุ name) และดูเลเยอร์เดียวละเอียด (ระบุ name) —
+ *  รวม bounds (x,y,width,height) ต่อเลเยอร์ ช่วยให้รู้ตำแหน่ง/ขนาดจริงโดยไม่ต้องกะเอง */
+export function layerList(name) {
+  const filter = name ? `if (_l.name !== '${esc(name)}') continue;` : '';
   return withHelpers(`
 var _d = app.activeDocument;
 var _out = [];
 for (var i = 0; i < _d.layers.length; i++) {
   var _l = _d.layers[i];
+  ${filter}
+  var _b = _l.bounds;
   _out.push({
     name: _l.name, index: i, visible: _l.visible,
     opacity: _num(_l.opacity), blendMode: String(_l.blendMode),
     locked: !!_l.allLocked, isBackground: !!_l.isBackgroundLayer,
     kind: String(_l.kind),
+    bounds: { x: _num(_b[0]), y: _num(_b[1]), width: _num(_b[2]) - _num(_b[0]), height: _num(_b[3]) - _num(_b[1]) },
   });
 }
 app.echoToOE(JSON.stringify(_out));`.trim());

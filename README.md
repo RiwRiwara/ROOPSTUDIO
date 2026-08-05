@@ -54,9 +54,15 @@ node src/index.js --port 5000
 - **ตัดพื้นหลังด้วย AI ที่รันในเครื่อง** — matting จริง ขอบขนสัตว์/เส้นผมฟุ้งได้ตามภาพจริง
   ไม่ใช่แค่ตัดตามสี ประมวลผลทั้งหมดในเครื่อง ไม่ผ่าน API ภายนอก
 - **จัดการเลเยอร์และใส่เอฟเฟกต์** — list/add/duplicate/reorder/blend mode/opacity
-  และ filter มาตรฐาน (blur, sharpen, noise ฯลฯ)
-- **รองรับภาษาไทยเต็มรูปแบบ** — โหลดฟอนต์ไทยเข้า Photopea ให้อัตโนมัติ, UI ภาษาไทย,
-  สูตรจัดหน้าที่เผื่อความสูงบรรทัดไทย
+  และ filter มาตรฐาน (blur, sharpen, noise ฯลฯ) — `roop_layer` action `list` บอก bounds
+  (ตำแหน่ง/ขนาดจริงเป็นพิกเซล) ของทุกเลเยอร์ให้ด้วย ไม่ต้องกะเอง
+- **หาตำแหน่งตัวแบบอัตโนมัติ** — `roop_detect_subject` ใช้โมเดล AI ตัวเดียวกับตัดพื้นหลัง
+  หา bounding box ของคน/วัตถุหลักในรูป ช่วยจัดองค์ประกอบ/ครอป/วางข้อความหลบตัวแบบได้แม่นยำ
+- **นำเข้าหลายรูปเป็นเลเยอร์ + export .psd** — `roop_import_layers` รวมรูปหลายไฟล์เป็น
+  เอกสารหลายชั้นในคำสั่งเดียว แล้ว `roop_export` เป็น `.psd` เก็บเลเยอร์ไว้ครบ เปิดต่อใน
+  Photoshop/Photopea ได้ตรง ๆ
+- **รองรับภาษาไทยเต็มรูปแบบ แต่ฉลาดพอจะไม่โหลดถ้าไม่จำเป็น** — ตรวจข้อความอัตโนมัติ
+  ถ้ามีอักษรไทยจะโหลดฟอนต์ไทยให้เอง ถ้าเป็นอังกฤษ/ละตินล้วนใช้ฟอนต์ระบบเฉย ๆ ไม่ต้องต่อเน็ต
 - **หน้า Studio แบบเห็นสด** — ไทม์ไลน์งานที่ AI ทำ, แกลเลอรีรูปที่ export, ปุ่มลัดกดเอง
   โดยไม่ชนกับคิวงานของ AI
 - **export หลายไฟล์ในคำสั่งเดียว** — เช่นทำครบทุกขนาดโซเชียลในรอบเดียว ไม่ต้องเรียกซ้ำ
@@ -78,10 +84,13 @@ node src/index.js --port 5000
 
 **งานสำเร็จรูป** — `roop_make_post_cover` (ภาพปกโพสต์ทุกขนาด จัดหน้าใหม่ต่อขนาด
 ตัวหนังสือจึงไม่โดนครอป), `roop_export_social_set` (ภาพเดียว → หลายขนาด ครอปกลาง),
-`roop_remove_background` (ตัดพื้นหลังด้วย AI ในคำสั่งเดียว — ดูหัวข้อด้านล่าง)
+`roop_remove_background` (ตัดพื้นหลังด้วย AI ในคำสั่งเดียว — ดูหัวข้อด้านล่าง),
+`roop_detect_subject` (หา bounding box ของตัวแบบอัตโนมัติด้วย AI — ดูหัวข้อด้านล่าง),
+`roop_import_layers` (รวมหลายรูปเป็นเอกสารหลายเลเยอร์ในคำสั่งเดียว เพื่อ export เป็น `.psd`)
 
 **เลเยอร์ / เอฟเฟกต์** — `roop_layer` (list/add/duplicate/rename/delete/select/reorder/set
-opacity-blendMode-visible-lock ของเลเยอร์ — ระบุ `action`), `roop_filter`
+opacity-blendMode-visible-lock ของเลเยอร์ — ระบุ `action`, action `list` มี bounds ของแต่ละ
+เลเยอร์ด้วย), `roop_filter`
 (gaussianBlur/sharpen/sharpenMore/unsharpMask/addNoise/motionBlur/highPass/despeckle
 บนเลเยอร์ที่กำลังเลือกอยู่)
 
@@ -91,9 +100,9 @@ opacity-blendMode-visible-lock ของเลเยอร์ — ระบุ `
 `roop_deselect`
 
 **ชิ้นส่วนอื่น** — `roop_status`, `roop_create_document`, `roop_document_info`,
-`roop_open_image`, `roop_place_image`, `roop_add_text`, `roop_add_rect`,
-`roop_adjust`, `roop_resize`, `roop_export`, `roop_load_thai_fonts`,
-`roop_list_fonts`, `roop_undo`, `roop_run_script`
+`roop_open_image`, `roop_place_image`, `roop_add_text` (auto-detect ฟอนต์ไทย/อังกฤษ),
+`roop_add_rect`, `roop_adjust`, `roop_resize`, `roop_export` (รองรับ `.psd` หลายเลเยอร์),
+`roop_load_thai_fonts`, `roop_list_fonts`, `roop_undo`, `roop_run_script`
 
 ## ตัดพื้นหลังด้วย AI (`roop_remove_background`)
 
@@ -106,7 +115,7 @@ ONNX รันบน `onnxruntime-node`) ทำ **matting จริง** — ข
 - ไม่ระบุ `source` → ตัดเอกสารที่เปิดอยู่ตอนนี้ แล้วแทนที่เลเยอร์เดิมด้วยผลลัพธ์
   (ชื่อ/ขนาดเอกสารเดิม พร้อม export ต่อได้เลย)
 - ระบุ `source` (พาธไฟล์/URL) → เปิดรูปนั้นเป็นเอกสารใหม่ที่ตัดพื้นหลังแล้ว
-- เลือกขนาดโมเดลด้วย `model`: `small` (เร็ว/หยาบ) · `medium` (ค่าเริ่มต้น) · `large` (แม่น/ช้า)
+- เลือกขนาดโมเดลด้วย `model`: `small` (เร็วกว่า/หยาบกว่าเล็กน้อย) หรือ `medium` (ค่าเริ่มต้น)
 
 **ครั้งแรกที่เรียกต้องต่อเน็ต** เพื่อดาวน์โหลดน้ำหนักโมเดล (แคชไว้ในเครื่องอัตโนมัติ)
 หลังจากนั้นรันได้แบบออฟไลน์ทั้งหมด — ไฟล์ภาพไม่ถูกส่งออกไปที่ไหนเลย ประมวลผลในเครื่องล้วน ๆ
@@ -115,6 +124,19 @@ ONNX รันบน `onnxruntime-node`) ทำ **matting จริง** — ข
 — `pnpm-workspace.yaml` อนุมัติ build script ของสองแพ็กเกจนี้ไว้ล่วงหน้าแล้ว (`allowBuilds`)
 ถ้าใช้ npm/yarn แทน pnpm อาจต้องอนุมัติ postinstall เอง
 
+## หาตำแหน่งตัวแบบอัตโนมัติ (`roop_detect_subject`)
+
+ใช้โมเดล AI ตัวเดียวกับ `roop_remove_background` หามวลพิกเซลของตัวแบบหลัก แล้วคืนกรอบ
+`{ x, y, width, height, imageWidth, imageHeight }` เป็นพิกเซล — เอาไปคำนวณตำแหน่งวางข้อความ/
+ครอป/จัดองค์ประกอบต่อได้ทันที โดยไม่ต้องกะพิกัดจากภาพเอง (จุดอ่อนเดิมตอนทำ selection ด้วยมือ)
+ไม่ระบุ `source` = ตรวจเอกสารที่เปิดอยู่ตอนนี้ (เป็น read-only ไม่แก้ไขเอกสาร)
+
+## นำเข้าหลายรูปเป็น .psd หลายเลเยอร์ (`roop_import_layers`)
+
+ให้ลิสต์รูป (`sources`) จะนำเข้าเป็นเอกสารเดียวกันคนละเลเยอร์ตามลำดับ — ถ้ายังไม่มีเอกสาร
+เปิดอยู่จะเปิดรูปแรกเป็นเอกสารใหม่ให้เอง (ขนาดเท่ารูปแรก) จากนั้น `roop_export` ด้วย
+`format: psd` จะได้ไฟล์ Photoshop หลายเลเยอร์ตรง ๆ เปิดต่อใน Photoshop/Photopea ได้เลย
+(เปิดไฟล์ `.psd` กลับเข้ามาก็ใช้ `roop_open_image` ตามปกติ — Photopea อ่าน `.psd` ได้เอง)
 
 ## License
 

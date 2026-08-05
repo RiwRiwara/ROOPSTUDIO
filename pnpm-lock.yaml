@@ -17,6 +17,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.12.0
         version: 1.30.0(zod@3.25.76)
+      sharp:
+        specifier: ^0.33.5
+        version: 0.33.5
       ws:
         specifier: ^8.18.0
         version: 8.21.1

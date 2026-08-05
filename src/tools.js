@@ -10,12 +10,16 @@ import * as P from './photopea.js';
 import { buildCover } from './cover.js';
 import { SOCIAL_SIZES, DEFAULT_SET, THAI_FONTS, COVER_THEMES } from './presets.js';
 import { readSource, writeOut, extFor, expandPath } from './files.js';
-import { removeBackgroundToPng } from './bgremove.js';
+import { removeBackgroundToPng, detectSubjectBBox } from './bgremove.js';
 import { basename, join } from 'path';
 
 const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'ใช้รูปแบบ #rrggbb');
 const ok = (text) => ({ content: [{ type: 'text', text }] });
 const fail = (text) => ({ isError: true, content: [{ type: 'text', text }] });
+
+/** มีอักษรไทยไหม — ใช้ตัดสินใจว่าต้องโหลดฟอนต์ไทย (ต่อเน็ต) หรือใช้ฟอนต์ระบบเฉย ๆ พอ */
+const THAI_RE = /[฀-๿]/;
+const hasThai = (s) => THAI_RE.test(String(s || ''));
 
 /** สถานะฟอนต์ไทยต่อหนึ่ง session — โหลดซ้ำไม่มีประโยชน์ */
 const state = { thaiFontsLoaded: false };
@@ -72,8 +76,8 @@ export function registerTools(server, bridge) {
     description:
       'สร้างภาพปกโพสต์พร้อมพาดหัวภาษาไทย/อังกฤษ ครบทุกขนาดโซเชียลในคำสั่งเดียว ' +
       'จัดหน้าใหม่ต่อขนาด (ไม่ใช่ครอปจากภาพเดียว ตัวหนังสือจึงไม่โดนตัด) ' +
-      'โหลดฟอนต์ไทยให้อัตโนมัติ ใส่รูปพื้นหลังได้จากไฟล์ในเครื่องหรือ URL ' +
-      'ถ้าระบุ outDir จะเซฟไฟล์ลงเครื่องให้เลย',
+      'โหลดฟอนต์ไทยให้อัตโนมัติเฉพาะตอนพาดหัว/ข้อความมีอักษรไทย (อังกฤษล้วนใช้ฟอนต์ระบบ ไม่ต้องต่อเน็ต) ' +
+      'ใส่รูปพื้นหลังได้จากไฟล์ในเครื่องหรือ URL ถ้าระบุ outDir จะเซฟไฟล์ลงเครื่องให้เลย',
     inputSchema: {
       headline: z.string().describe('พาดหัว — ภาษาไทยได้ ขึ้นบรรทัดใหม่ด้วย \\n'),
       subtitle: z.string().optional().describe('ข้อความรอง ใต้พาดหัว'),
@@ -97,11 +101,13 @@ export function registerTools(server, bridge) {
     const theme = COVER_THEMES[themeKey];
     const famKey = a.font || 'plex';
     const fam = THAI_FONTS[famKey];
-    const fontBold = (fam.bold || fam.regular).postScriptName;
-    const fontRegular = (fam.regular || fam.bold).postScriptName;
     const format = a.format || 'png';
 
-    await ensureThaiFonts(bridge, [famKey]);
+    // ข้อความอังกฤษ/ละตินล้วนไม่ต้องโหลดฟอนต์ไทย (ต่อเน็ต) — ใช้ฟอนต์ระบบที่มีอยู่แล้วพอ
+    const needThai = hasThai([a.headline, a.subtitle, a.brandMark].filter(Boolean).join(''));
+    const fontBold = needThai ? (fam.bold || fam.regular).postScriptName : 'Arial-BoldMT';
+    const fontRegular = needThai ? (fam.regular || fam.bold).postScriptName : 'ArialMT';
+    if (needThai) await ensureThaiFonts(bridge, [famKey]);
 
     // พื้นหลัง: ส่งเข้า Photopea ครั้งเดียว แล้วก๊อปใช้ซ้ำทุกขนาด
     let bgDocName = null;
@@ -272,9 +278,67 @@ export function registerTools(server, bridge) {
     return r.ok ? ok('วางรูปแล้ว') : fail(r.error);
   });
 
+  server.registerTool('roop_import_layers', {
+    title: 'นำเข้าหลายรูปเป็นเลเยอร์ (ทำ .psd หลายชั้น)',
+    description:
+      'นำเข้ารูปหลายไฟล์/URL เข้าเอกสารเดียวกัน คนละเลเยอร์ตามลำดับที่ระบุใน sources ' +
+      'เหมาะกับสร้างไฟล์ .psd หลายชั้นจากรูปแยกกันในคำสั่งเดียว — export ต่อด้วย roop_export format: psd ' +
+      'ถ้ายังไม่มีเอกสารเปิดอยู่จะเปิดรูปแรกเป็นเอกสารใหม่ให้อัตโนมัติ (ขนาดเท่ารูปแรก) ' +
+      'ถ้ามีเอกสารเปิดอยู่แล้วจะวางทุกรูปเป็นเลเยอร์ใหม่ต่อท้ายในเอกสารนั้น',
+    inputSchema: {
+      sources: z.array(z.string()).min(1).describe('รายการพาธไฟล์ในเครื่องหรือ URL ตามลำดับ'),
+      names: z.array(z.string()).optional().describe('ชื่อเลเยอร์ตามลำดับเดียวกับ sources (ไม่ระบุ = ใช้ชื่อไฟล์)'),
+      fit: z.enum(['cover', 'contain', 'none']).optional()
+        .describe('วิธีจัดขนาดรูปที่วางเพิ่ม (ไม่มีผลกับรูปแรกตอนสร้างเอกสารใหม่ซึ่งใช้ขนาดเดิมเสมอ) ค่าเริ่มต้น none'),
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, async (a) => {
+    if (!a.sources.length) return fail('ต้องระบุ sources อย่างน้อย 1 รูป');
+    const nameFor = (i) => (a.names && a.names[i])
+      || basename(String(a.sources[i]).split('?')[0]).replace(/\.[^.]+$/, '') || `layer-${i + 1}`;
+
+    const info = await bridge.run(P.documentInfo(), { tool: 'document_info', summary: 'เช็คเอกสารเป้าหมาย' });
+    let targetName, startIndex;
+
+    if (info.ok) {
+      try { targetName = JSON.parse(info.echo).name; } catch { return fail('อ่านชื่อเอกสารไม่ได้'); }
+      startIndex = 0;
+    } else {
+      let firstBuf;
+      try { firstBuf = await readSource(a.sources[0]); } catch (e) { return fail(`รูปที่ 1: ${e.message}`); }
+      const load0 = await bridge.load(firstBuf, basename(String(a.sources[0]).split('?')[0]) || 'image');
+      if (!load0.ok) return fail(`รูปที่ 1: ${load0.error}`);
+      const info0 = await bridge.run(P.documentInfo(), { tool: 'document_info', summary: 'อ่านเอกสารที่เพิ่งเปิด' });
+      if (!info0.ok) return fail('เปิดรูปแรกไม่สำเร็จ');
+      let d0; try { d0 = JSON.parse(info0.echo); } catch { return fail('อ่านข้อมูลเอกสารไม่ได้'); }
+      targetName = d0.name;
+      const rn = await bridge.run(P.layerRename({ name: d0.layers[0], newName: nameFor(0) }), {
+        tool: 'layer', summary: `ตั้งชื่อเลเยอร์ "${nameFor(0)}"`,
+      });
+      if (!rn.ok) return fail(rn.error);
+      startIndex = 1;
+    }
+
+    for (let i = startIndex; i < a.sources.length; i++) {
+      let buf;
+      try { buf = await readSource(a.sources[i]); } catch (e) { return fail(`รูปที่ ${i + 1}: ${e.message}`); }
+      const load = await bridge.load(buf, basename(String(a.sources[i]).split('?')[0]) || 'image');
+      if (!load.ok) return fail(`รูปที่ ${i + 1}: ${load.error}`);
+      const r = await bridge.run(P.mergeLoadedInto({
+        targetName, fit: a.fit || 'none', name: nameFor(i),
+      }), { tool: 'import_layers', summary: `วางเลเยอร์ "${nameFor(i)}" (${i + 1}/${a.sources.length})` });
+      if (!r.ok) return fail(`รูปที่ ${i + 1}: ${r.error}`);
+    }
+
+    return ok(`นำเข้า ${a.sources.length} รูปเป็นเลเยอร์ในเอกสาร "${targetName}" แล้ว — export เป็น .psd ได้เลย`);
+  });
+
   server.registerTool('roop_add_text', {
     title: 'ใส่ข้อความ',
-    description: 'เพิ่มเลเยอร์ข้อความ — ถ้าเป็นภาษาไทยให้เรียก roop_load_thai_fonts ก่อน แล้วส่งชื่อฟอนต์ที่ได้มาในช่อง font',
+    description:
+      'เพิ่มเลเยอร์ข้อความ — ถ้าไม่ระบุ font และเนื้อหามีอักษรไทย จะโหลดฟอนต์ไทย (IBM Plex Sans Thai) ' +
+      'ให้อัตโนมัติแล้วใช้เลย (ต่อเน็ตครั้งแรกครั้งเดียว) ถ้าเป็นอังกฤษ/ละตินล้วนจะใช้ฟอนต์ระบบเฉย ๆ ไม่ต้องโหลดอะไรเพิ่ม — ' +
+      'ระบุ font เองได้เสมอถ้าอยากคุมฟอนต์ (ดูชื่อได้จาก roop_list_fonts หรือ roop_load_thai_fonts)',
     inputSchema: {
       content: z.string(), x: z.number(), y: z.number(),
       font: z.string().optional(), size: z.number().positive().optional(),
@@ -286,7 +350,12 @@ export function registerTools(server, bridge) {
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async (a) => {
-    const r = await bridge.run(P.addText(a), {
+    let font = a.font;
+    if (!font && hasThai(a.content)) {
+      await ensureThaiFonts(bridge, ['plex']);
+      font = THAI_FONTS.plex.regular.postScriptName;
+    }
+    const r = await bridge.run(P.addText({ ...a, font }), {
       tool: 'add_text', summary: `ใส่ข้อความ "${a.content.slice(0, 30)}"`,
     });
     return r.ok ? ok('ใส่ข้อความแล้ว') : fail(r.error);
@@ -318,8 +387,8 @@ export function registerTools(server, bridge) {
       'ระบุ source = เปิดรูปนั้นเป็นเอกสารใหม่ที่ตัดพื้นหลังแล้วเลย',
     inputSchema: {
       source: z.string().optional().describe('พาธไฟล์ในเครื่องหรือ URL — ถ้าไม่ระบุจะใช้เอกสารที่เปิดอยู่ตอนนี้'),
-      model: z.enum(['small', 'medium', 'large']).optional()
-        .describe('ขนาดโมเดล — small เร็วสุด/หยาบสุด, large แม่นสุด/ช้าสุด (ค่าเริ่มต้น medium)'),
+      model: z.enum(['small', 'medium']).optional()
+        .describe('ขนาดโมเดล — small เร็วกว่า/หยาบกว่าเล็กน้อย (ค่าเริ่มต้น medium)'),
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   }, async (a) => {
@@ -359,14 +428,47 @@ export function registerTools(server, bridge) {
     return ok(`ตัดพื้นหลังแล้ว (โมเดล ${model}) — เปิดเป็นเอกสารใหม่`);
   });
 
+  server.registerTool('roop_detect_subject', {
+    title: 'หาตำแหน่งตัวแบบอัตโนมัติ (AI)',
+    description:
+      'หา bounding box ของตัวแบบหลักในรูป (คนละ/วัตถุที่ตัด background ออกมาได้) ด้วยโมเดลตัดพื้นหลังตัวเดียวกับ ' +
+      'roop_remove_background — ใช้ตอนจะจัดองค์ประกอบ/ครอป/วางข้อความหลบตัวแบบ/คำนวณตำแหน่งวาง โดยไม่ต้องกะพิกัดเอง ' +
+      'คืนพิกัด x, y, width, height ของกรอบที่ครอบตัวแบบพอดี (หน่วยพิกเซล อ้างอิงมุมบนซ้าย) พร้อมขนาดภาพต้นฉบับ ' +
+      'ไม่ระบุ source = ใช้เอกสารที่เปิดอยู่ตอนนี้ (export ปัจจุบันไปตรวจ ไม่แก้ไขเอกสาร)',
+    inputSchema: {
+      source: z.string().optional().describe('พาธไฟล์ในเครื่องหรือ URL — ถ้าไม่ระบุจะใช้เอกสารที่เปิดอยู่ตอนนี้'),
+      model: z.enum(['small', 'medium']).optional().describe('ค่าเริ่มต้น medium'),
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, async (a) => {
+    const model = a.model || 'medium';
+    let srcBuf;
+    if (a.source) {
+      try { srcBuf = await readSource(a.source); } catch (e) { return fail(e.message); }
+    } else {
+      const exp = await bridge.run(P.exportDoc({ format: 'png' }), {
+        expectFiles: true, tool: 'detect_subject', summary: 'export เอกสารปัจจุบันเพื่อหาตำแหน่งตัวแบบ',
+      });
+      if (!exp.ok || !exp.files.length) return fail(exp.error || 'export เอกสารปัจจุบันไม่สำเร็จ');
+      srcBuf = exp.files[0].data;
+    }
+    let bbox;
+    try { bbox = await detectSubjectBBox(srcBuf, { model }); } catch (e) { return fail(`หาตำแหน่งตัวแบบไม่สำเร็จ: ${e.message}`); }
+    if (!bbox) return fail('ไม่เจอตัวแบบที่แยกออกจากพื้นหลังได้ (พื้นหลังอาจล้วนทั้งภาพ หรือตัวแบบจางเกินไป)');
+    return ok(JSON.stringify(bbox));
+  });
+
   server.registerTool('roop_layer', {
     title: 'จัดการเลเยอร์',
     description:
       'list/add/duplicate/rename/delete/select/reorder/set ของเลเยอร์ในเอกสารที่เปิดอยู่ ' +
-      '(อ้างเลเยอร์ด้วยชื่อ — ไม่รองรับ layer group ซ้อนโฟลเดอร์)',
+      '(อ้างเลเยอร์ด้วยชื่อ — ไม่รองรับ layer group ซ้อนโฟลเดอร์) ' +
+      'action list คืนรายละเอียดทุกเลเยอร์รวม bounds (x, y, width, height เป็นพิกเซล) — ' +
+      'ระบุ name ด้วยจะได้แค่เลเยอร์นั้นเลเยอร์เดียว ใช้ดูตำแหน่ง/ขนาดจริงก่อนจัดวางอย่างอื่น',
     inputSchema: {
       action: z.enum(['list', 'add', 'duplicate', 'rename', 'delete', 'select', 'reorder', 'set']),
-      name: z.string().optional().describe('ชื่อเลเยอร์เป้าหมาย — ต้องระบุทุก action ยกเว้น list/add'),
+      name: z.string().optional()
+        .describe('ชื่อเลเยอร์เป้าหมาย — ต้องระบุทุก action ยกเว้น add (list ใช้กรองผลลัพธ์ได้ ไม่ระบุ = คืนทุกเลเยอร์)'),
       newName: z.string().optional().describe('ชื่อใหม่ — ใช้กับ rename/duplicate'),
       direction: z.enum(['up', 'down', 'top', 'bottom']).optional().describe('ใช้กับ reorder'),
       visible: z.boolean().optional().describe('ใช้กับ set'),
@@ -387,7 +489,7 @@ export function registerTools(server, bridge) {
     let script;
     try {
       script = {
-        list: () => P.layerList(),
+        list: () => P.layerList(a.name),
         add: () => P.layerAdd({ name: a.name || 'layer' }),
         duplicate: () => P.layerDuplicate({ name: a.name, newName: a.newName }),
         rename: () => { if (!a.newName) throw new Error('action rename ต้องระบุ newName'); return P.layerRename({ name: a.name, newName: a.newName }); },
